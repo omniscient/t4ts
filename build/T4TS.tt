@@ -1,4 +1,4 @@
-﻿<#@ template language="C#" debug="true" hostspecific="true" #>
+<#@ template language="C#" debug="true" hostspecific="true" #>
 <#@ output extension=".d.ts" #>
 <#@ assembly name="System.Core" #>
 <#@ assembly name="Microsoft.VisualStudio.Shell.Interop.8.0" #>
@@ -12,7 +12,16 @@
 <#@ import namespace="Microsoft.VisualStudio.TextTemplating" #>
 <#@ Include File="T4TS.tt.settings.t4" #>
 <#= 
-    OutputFormatter.GetOutput(GetDataToRender()) #><#+ 
+    OutputFormatter.GetOutput(GetDataToRender(), GetSettings()) #><#+ 
+
+Settings settings = null;
+Settings GetSettings()
+{
+    if (settings== null)
+        settings = Settings.Parse(SettingsValues);
+
+    return settings;
+}
 
 List<TypeScriptModule> GetDataToRender() {
     DTE dte = null;
@@ -31,17 +40,7 @@ List<TypeScriptModule> GetDataToRender() {
     if (project == null)
         throw new Exception("Could not find the VS project containing the T4TS file.");
 
-    // Read settings from T4TS.tt.settings.tt
-    var settings = new Settings
-    {
-        DefaultModule = DefaultModule,
-        DefaultOptional = DefaultOptional,
-        DefaultCamelCaseMemberNames = DefaultCamelCaseMemberNames,
-        DefaultInterfaceNamePrefix = DefaultInterfaceNamePrefix
-    };
-
-    var generator = new CodeTraverser(project, settings);
-
+    var generator = new CodeTraverser(project, GetSettings());
     return generator.GetAllInterfaces().ToList();
 }
 
@@ -62,12 +61,12 @@ Project GetProjectContainingT4File(DTE dte) {
     return projectItem.ContainingProject;
 }
 
-public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
+    public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
     {
         private bool InGlobalModule { get; set; }
 
-        public InterfaceOutputAppender(StringBuilder output, int baseIndentation, bool inGlobalModule)
-            : base(output, baseIndentation)
+        public InterfaceOutputAppender(StringBuilder output, int baseIndentation, Settings settings, bool inGlobalModule)
+            : base(output, baseIndentation, settings)
         {
             this.InGlobalModule = inGlobalModule;
         }
@@ -86,7 +85,7 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
 
         private void AppendMembers(TypeScriptInterface tsInterface)
         {
-            var appender = new MemberOutputAppender(Output, BaseIndentation + 4);
+            var appender = new MemberOutputAppender(Output, BaseIndentation + 4, Settings);
             foreach (var member in tsInterface.Members)
                 appender.AppendOutput(member);
         }
@@ -121,8 +120,8 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
 
     public class MemberOutputAppender : OutputAppender<TypeScriptInterfaceMember>
     {
-        public MemberOutputAppender(StringBuilder output, int baseIndentation)
-            : base(output, baseIndentation)
+        public MemberOutputAppender(StringBuilder output, int baseIndentation, Settings settings)
+            : base(output, baseIndentation, settings)
         {
         }
 
@@ -131,21 +130,30 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
             AppendIndendation();
 
             bool isOptional = member.Optional || (member.Type is NullableType);
+            string type = member.Type.ToString();
+
+            if (member.Type is BoolType)
+            {
+                if (Settings.CompatibilityVersion != null && Settings.CompatibilityVersion < new Version(0, 9, 0))
+                    type = "bool";
+                else
+                    type = "boolean";
+            }
 
             Output.AppendFormat("{0}{1}: {2}",
                 member.Name,
                 (isOptional ? "?" : ""),
-                member.Type
+                type
             );
             
             Output.AppendLine(";");
         }
     }
-    
+
     public class ModuleOutputAppender : OutputAppender<TypeScriptModule>
     {
-        public ModuleOutputAppender(StringBuilder output, int baseIndentation)
-            : base(output, baseIndentation)
+        public ModuleOutputAppender(StringBuilder output, int baseIndentation, Settings settings)
+            : base(output, baseIndentation, settings)
         {
         }
 
@@ -153,7 +161,7 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
         {
             BeginModule(module);
 
-            var interfaceAppender = new InterfaceOutputAppender(Output, BaseIndentation + 4, module.IsGlobal);
+            var interfaceAppender = new InterfaceOutputAppender(Output, BaseIndentation + 4, Settings, module.IsGlobal);
             foreach (var tsInterface in module.Interfaces)
                 interfaceAppender.AppendOutput(tsInterface);
 
@@ -168,7 +176,11 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
             }
             else
             {
-                Output.Append("module ");
+                if (Settings.CompatibilityVersion != null && Settings.CompatibilityVersion < new Version(0, 9, 0))
+                    Output.Append("module ");
+                else
+                    Output.Append("declare module ");
+
                 Output.Append(module.QualifiedName);
                 Output.AppendLine(" {");
             }
@@ -182,19 +194,24 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
                 Output.AppendLine("}");
         }
     }
-    
+
     public abstract class OutputAppender<TSegment> where TSegment: class
     {
         protected StringBuilder Output { get; private set; }
         protected int BaseIndentation { get; private set; }
+        protected Settings Settings { get; private set; }
 
-        public OutputAppender(StringBuilder output, int baseIndentation)
+        public OutputAppender(StringBuilder output, int baseIndentation, Settings settings)
         {
             if (output == null)
                 throw new ArgumentNullException("output");
+            
+            if (settings == null)
+                throw new ArgumentNullException("settings");
 
             this.Output = output;
             this.BaseIndentation = baseIndentation;
+            this.Settings = settings;
         }
 
         public abstract void AppendOutput(TSegment segment);
@@ -221,10 +238,10 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
             return Output.ToString();
         }
     }
-    
+
     public static class OutputFormatter
     {
-        public static string GetOutput(List<TypeScriptModule> modules)
+        public static string GetOutput(List<TypeScriptModule> modules, Settings settings)
         {
             var output = new StringBuilder();
             
@@ -232,7 +249,7 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
             output.AppendLine("  Generated by T4TS.tt - don't make any changes in this file");
             output.AppendLine("****************************************************************************/");
 
-            var moduleAppender = new ModuleOutputAppender(output, 0);
+            var moduleAppender = new ModuleOutputAppender(output, 0, settings);
             foreach (var module in modules)
             {
                 output.AppendLine();
@@ -242,30 +259,7 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
             return output.ToString();
         }
     }
-    
-    public class Settings
-    {
-        /// <summary>
-        /// The default module of the generated interface, if not specified by the TypeScriptInterfaceAttribute
-        /// </summary>
-        public string DefaultModule { get; set; }
 
-        /// <summary>
-        /// The default value for Optional, if not specified by the TypeScriptMemberAttribute
-        /// </summary>
-        public bool DefaultOptional { get; set; }
-
-        /// <summary>
-        /// The default value for the CamelCase flag for an interface member name, if not specified by the TypeScriptMemberAttribute
-        /// </summary>
-        public bool DefaultCamelCaseMemberNames { get; set; }
-
-        /// <summary>
-        /// The default string to prefix interface names with. For instance, you might want to prefix the names with an "I" to get conventional interface names.
-        /// </summary>
-        public string DefaultInterfaceNamePrefix { get; set; }
-    }
-    
     public class TypeScriptInterface
     {
         public string Name { get; set; }
@@ -281,14 +275,14 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
             Members = new List<TypeScriptInterfaceMember>();
         }
     }
-    
+
     public class TypeScriptInterfaceAttributeValues
     {
         public string Module { get; set; }
         public string Name { get; set; }
         public string NamePrefix { get; set; }
     }
-    
+
     public class TypeScriptInterfaceMember
     {
         public string Name { get; set; }
@@ -296,13 +290,14 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
         public bool Optional { get; set; }
         public string FullName { get; set; }
     }
-    
+
     public class TypeScriptMemberAttributeValues
     {
         public string Name { get; set; }
         public bool Optional { get; set; }
         public string Type { get; set; }
         public bool CamelCase { get; set; }
+        public bool Ignore { get; set; }
     }
 
     public class TypeScriptModule
@@ -323,7 +318,7 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
             Interfaces = new List<TypeScriptInterface>();
         }
     }
-    
+
     public class ClassTraverser
     {
         public CodeClass CodeClass { get; private set; }
@@ -350,7 +345,7 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
                 WithProperty(property);
         }
     }
-    
+
     public class NamespaceTraverser
     {
         public Action<CodeClass> WithCodeClass { get; private set; }
@@ -375,7 +370,7 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
                 WithCodeClass(codeClass);
         }
     }
-    
+
     public class ProjectTraverser
     {
         public Action<CodeNamespace> WithNamespace { get; private set; }
@@ -410,7 +405,7 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
             }
         }
     }
-    
+
     public class ArrayType: TypescriptType
     {
         public TypescriptType ElementType { get; set; }
@@ -420,15 +415,15 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
             return ElementType.ToString() + "[]";
         }
     }
-    
+
     public class BoolType: TypescriptType
     {
         public override string Name
         {
-            get { return "bool"; }
+            get { return "boolean"; }
         }
     }
-    
+
     public class InterfaceType : TypescriptType
     {
         public TypeScriptInterfaceAttributeValues AttributeValues { get; private set; }
@@ -476,7 +471,7 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
             return QualifedModule + "." + base.ToString();
         }
     }
-    
+
     public class NullableType : TypescriptType
     {
         public TypescriptType WrappedType { get; set; }
@@ -486,7 +481,7 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
             return WrappedType.ToString();
         }
     }
-    
+
     public class NumberType : TypescriptType
     {
         public override string Name
@@ -494,7 +489,7 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
             get { return "number"; }
         }
     }
-    
+
     public class StringType: TypescriptType
     {
         public override string Name
@@ -512,7 +507,7 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
             return Name;
         }
     }
-    
+
     public class CodeTraverser
     {
         public Project Project { get; private set; }
@@ -687,6 +682,10 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
                 return false;
 
             var values = GetMemberValues(property, typeContext);
+            
+			if (values.Ignore)
+                return false;
+
             member = new TypeScriptInterfaceMember
             {
                 Name = values.Name ?? property.Name,
@@ -707,6 +706,7 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
         {
             bool? attributeOptional = null;
             bool? attributeCamelCase = null;
+            bool? attributeIgnore = null;
             string attributeName = null;
             string attributeType = null;
 
@@ -720,6 +720,9 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
                 if (values.ContainsKey("CamelCase"))
                     attributeCamelCase = values["CamelCase"] == "true";
 
+                if (values.ContainsKey("Ignore"))
+                    attributeIgnore = values["Ignore"] == "true";
+
                 values.TryGetValue("Name", out attributeName);
                 values.TryGetValue("Type", out attributeType);
             }
@@ -729,7 +732,8 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
                 Optional = attributeOptional.HasValue ? attributeOptional.Value : Settings.DefaultOptional,
                 Name = attributeName,
                 Type = attributeType,
-                CamelCase = attributeCamelCase ?? Settings.DefaultCamelCaseMemberNames
+                CamelCase = attributeCamelCase ?? Settings.DefaultCamelCaseMemberNames,
+                Ignore = attributeIgnore ?? false
             };
         }
 
@@ -753,7 +757,81 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
             return values;
         }
     }
-    
+
+    public class Settings
+    {
+        /// <summary>
+        /// The default module of the generated interface, if not specified by the TypeScriptInterfaceAttribute
+        /// </summary>
+        public string DefaultModule { get; set; }
+
+        /// <summary>
+        /// The default value for Optional, if not specified by the TypeScriptMemberAttribute
+        /// </summary>
+        public bool DefaultOptional { get; set; }
+
+        /// <summary>
+        /// The default value for the CamelCase flag for an interface member name, if not specified by the TypeScriptMemberAttribute
+        /// </summary>
+        public bool DefaultCamelCaseMemberNames { get; set; }
+
+        /// <summary>
+        /// The default string to prefix interface names with. For instance, you might want to prefix the names with an "I" to get conventional interface names.
+        /// </summary>
+        public string DefaultInterfaceNamePrefix { get; set; }
+
+        /// <summary>
+        /// The version of Typescript that is targeted
+        /// </summary>
+        public Version CompatibilityVersion { get; set; }
+
+        public static Settings Parse(Dictionary<string,object> settingsValues)
+        {
+            // Read settings from T4TS.tt.settings.tt
+            return new Settings
+            {
+                DefaultModule = ParseSettingReferenceType(settingsValues, "DefaultModule", s => s as string, "T4TS"),
+                DefaultOptional = ParseSettingNullableType(settingsValues, "DefaultOptional", false),
+                DefaultCamelCaseMemberNames = ParseSettingNullableType(settingsValues, "DefaultCamelCaseMemberNames", false),
+                DefaultInterfaceNamePrefix = ParseSettingReferenceType(settingsValues, "DefaultInterfaceNamePrefix", s => s as string, string.Empty),
+                CompatibilityVersion = ParseSettingReferenceType(settingsValues, "CompatibilityVersion", v => v as Version, new Version(0, 9, 1, 1))
+            };
+        }
+
+        private static T ParseSettingReferenceType<T>(Dictionary<string, object> settingsValues, string key, Func<object, T> convert, T defaultValue) where T : class
+        {
+            object val;
+            if (settingsValues.TryGetValue(key, out val))
+                return convert(val) ?? defaultValue;
+
+            return defaultValue;
+        }
+
+        private static T ParseSettingNullableType<T>(Dictionary<string, object> settingsValues, string key, T defaultValue) where T : struct
+        {
+            object val;
+            if (settingsValues.TryGetValue(key, out val))
+            {
+                var nullable = val as Nullable<T>;
+                if (nullable == null || !nullable.HasValue)
+                    return defaultValue;
+
+                return nullable.Value;
+            }
+
+            return defaultValue;
+        }
+
+        private static T ParseConfigValueType<T>(Dictionary<string, object> settingsValues, string key, Func<object, T> convert, T defaultValue)
+        {
+            object val;
+            if (settingsValues.TryGetValue(key, out val))
+                return convert(val);
+
+            return defaultValue;
+        }
+    }
+
     public class TypeContext
     {
         private static readonly string[] genericCollectionTypeStarts = new string[] {
@@ -891,4 +969,5 @@ public class InterfaceOutputAppender : OutputAppender<TypeScriptInterface>
             return genericCollectionTypeStarts.Any(t => typeFullName.StartsWith(t));
         }
     }
+
 #>
