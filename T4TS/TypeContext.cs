@@ -7,6 +7,7 @@ namespace T4TS
     public class TypeContext
     {
         public Settings Settings { get; private set; }
+
         public TypeContext(Settings settings)
         {
             this.Settings = settings;
@@ -15,7 +16,8 @@ namespace T4TS
         private static readonly string[] genericCollectionTypeStarts = new string[] {
             "System.Collections.Generic.List<",
             "System.Collections.Generic.IList<",
-            "System.Collections.Generic.ICollection<"
+            "System.Collections.Generic.ICollection<",
+			"System.Data.Objects.DataClasses.EntityCollection<"
         };
 
         private static readonly string nullableTypeStart = "System.Nullable<";
@@ -46,10 +48,10 @@ namespace T4TS
             {
                 case vsCMTypeRef.vsCMTypeRefChar:
                 case vsCMTypeRef.vsCMTypeRefString:
-                    return new StringType();
+                    return new StringType(this.Settings.KnockoutObservable);
 
                 case vsCMTypeRef.vsCMTypeRefBool:
-                    return new BoolType();
+                    return new BoolType(this.Settings.KnockoutObservable, this.Settings.CompatibilityVersion);
 
                 case vsCMTypeRef.vsCMTypeRefByte:
                 case vsCMTypeRef.vsCMTypeRefDouble:
@@ -58,7 +60,7 @@ namespace T4TS
                 case vsCMTypeRef.vsCMTypeRefFloat:
                 case vsCMTypeRef.vsCMTypeRefLong:
                 case vsCMTypeRef.vsCMTypeRefDecimal:
-                    return new NumberType();
+                    return new NumberType(this.Settings.KnockoutObservable);
 
                 default:
                     return TryResolveType(codeType);
@@ -69,7 +71,7 @@ namespace T4TS
         {
             if (codeType.TypeKind == vsCMTypeRef.vsCMTypeRefArray)
             {
-                return new ArrayType()
+                return new ArrayType(this.Settings.KnockoutObservable)
                 {
                     ElementType = GetTypeScriptType(codeType.ElementType)
                 };
@@ -80,7 +82,7 @@ namespace T4TS
 
         private ArrayType TryResolveEnumerableType(string typeFullName)
         {
-            return new ArrayType
+            return new ArrayType(this.Settings.KnockoutObservable)
             {
                 ElementType = GetTypeScriptType(typeFullName)
             };
@@ -94,7 +96,7 @@ namespace T4TS
 
             if (IsGenericEnumerable(typeFullName))
             {
-                return new ArrayType
+                return new ArrayType(this.Settings.KnockoutObservable)
                 {
                     ElementType = GetTypeScriptType(UnwrapGenericType(typeFullName))
                 };
@@ -109,9 +111,10 @@ namespace T4TS
 
             switch (typeFullName)
             {
-                case "System.Guid":
-                    return new GuidType();
-
+				case "System.Guid":
+                    return new GuidType(this.Settings.KnockoutObservable);
+                case "System.Boolean":
+                    return new BoolType(this.Settings.KnockoutObservable);
                 case "System.Double":
                 case "System.Int16":
                 case "System.Int32":
@@ -123,19 +126,18 @@ namespace T4TS
                 case "System.Byte":
                 case "System.SByte":
                 case "System.Single":
-                    return new NumberType();
+                    return new NumberType(this.Settings.KnockoutObservable);
 
                 case "System.String":
-                    return new StringType();
-
+					return new StringType(this.Settings.KnockoutObservable);
                 case "System.DateTime":
                     if (Settings.UseNativeDates)
-                        return new DateTimeType();
-                    else
-                        return new StringType();
+                        return new DateTimeType(this.Settings.KnockoutObservable);
 
+                    return new StringType(this.Settings.KnockoutObservable);
+					
                 default:
-                    return new TypescriptType();
+                    return new TypescriptType(this.Settings.KnockoutObservable);
             }
         }
 
@@ -147,7 +149,7 @@ namespace T4TS
         public string UnwrapGenericType(string typeFullName)
         {
             int firstIndex = typeFullName.IndexOf('<');
-            return typeFullName.Substring(firstIndex+1, typeFullName.Length - firstIndex- 2);
+            return typeFullName.Substring(firstIndex + 1, typeFullName.Length - firstIndex - 2);
         }
 
         public bool IsGenericEnumerable(string typeFullName)

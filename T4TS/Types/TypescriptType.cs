@@ -8,7 +8,22 @@ namespace T4TS
 {
     public class TypescriptType
     {
-        public virtual string Name { get { return "any"; } }
+        protected const string KnockoutObservable = "KnockoutObservable";
+        
+        protected bool isKnockoutObservable;
+
+        public TypescriptType(bool isKnockoutObservable = false)
+        {
+            this.isKnockoutObservable = isKnockoutObservable;
+        }
+
+        public virtual string Name
+        {
+            get
+            {
+                return "any";
+            }
+        }
 
         public override string ToString()
         {

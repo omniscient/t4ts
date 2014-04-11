@@ -8,9 +8,20 @@ namespace T4TS
 {
     public class NumberType : TypescriptType
     {
+        public NumberType(bool isKnockoutObservable = false)
+            : base(isKnockoutObservable)
+        {
+        }
+
         public override string Name
         {
-            get { return "number"; }
+            get
+            {
+                if (this.isKnockoutObservable)
+                    return string.Format("{0}<number>", KnockoutObservable);
+
+                return "number";
+            }
         }
     }
 }

@@ -28,27 +28,33 @@ namespace T4TS
         /// </summary>
         public string DefaultInterfaceNamePrefix { get; set; }
 
+		/// <summary>
+        /// If true translates System.DateTime to native date
+        /// </summary>
+        public bool UseNativeDates { get; set; }
+
+        /// <summary>
+        /// Generate knockout observable
+        /// </summary>
+        public bool KnockoutObservable { get; set; }
+
         /// <summary>
         /// The version of Typescript that is targeted
         /// </summary>
         public Version CompatibilityVersion { get; set; }
 
-        /// <summary>
-        /// If true translates System.DateTime to native date
-        /// </summary>
-        public bool UseNativeDates { get; set; }
-
-        public static Settings Parse(Dictionary<string,object> settingsValues)
+        public static Settings Parse(Dictionary<string, object> settingsValues)
         {
             // Read settings from T4TS.tt.settings.tt
             return new Settings
             {
                 DefaultModule = ParseSettingReferenceType(settingsValues, "DefaultModule", s => s as string, "T4TS"),
                 DefaultOptional = ParseSettingNullableType(settingsValues, "DefaultOptional", false),
+                KnockoutObservable = ParseSettingNullableType(settingsValues, "KnockoutObservable", true),
                 DefaultCamelCaseMemberNames = ParseSettingNullableType(settingsValues, "DefaultCamelCaseMemberNames", false),
                 DefaultInterfaceNamePrefix = ParseSettingReferenceType(settingsValues, "DefaultInterfaceNamePrefix", s => s as string, string.Empty),
                 CompatibilityVersion = ParseSettingReferenceType(settingsValues, "CompatibilityVersion", v => v as Version, new Version(0, 9, 1, 1)),
-                UseNativeDates = ParseSettingNullableType(settingsValues, "UseNativeDates", false)
+				UseNativeDates = ParseSettingNullableType(settingsValues, "UseNativeDates", false)
             };
         }
 

@@ -6,11 +6,22 @@ using System.Threading.Tasks;
 
 namespace T4TS
 {
-    public class StringType: TypescriptType
+    public class StringType : TypescriptType
     {
+        public StringType(bool isKnockoutObservable = false)
+            : base(isKnockoutObservable)
+        {
+        }
+
         public override string Name
         {
-            get { return "string"; }
+            get
+            {
+                if (this.isKnockoutObservable)
+                    return string.Format("{0}<string>", KnockoutObservable);
+
+                return "string";
+            }
         }
     }
 }
